@@ -215,7 +215,12 @@ struct GameState {
     Camera worldCamera;
     Camera puzzleCamera;
     Tilemap<WorldTile> *worldTilemap;
+    // TEMP: make puzzle struct?
     Tilemap<PuzzleTile> *puzzleTilemap;
+    pair *sources;
+    pair *sinks;
+    int numSourceSinks;
+
     TileSelection selection;
     // an array of entity pointers
     Entity *entities[1000]; // TODO: estimate max number of entities
@@ -230,6 +235,7 @@ void renderTilemap(Engine *engine, Tilemap<Tile> *tilemap);
 void worldModeUpdate(GameState *game, Engine *engine);
 void drawEntities(Engine *engine, Entity **entities, int numEntities);
 bool canMoveTo(pair dest, pair source, Tilemap<PuzzleTile> *tilemap);
+bool hasSourceSinkPath(pair source, pair sink, Tilemap<PuzzleTile> *puzzlemap);
 
 // NOTE: this provides an alias to reference player (entity 0)
 inline Player *GameState::player(void) {

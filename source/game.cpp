@@ -18,8 +18,7 @@ static const int playerColor = (0xFF << 24) | (0xA0 << 16) | (0x00 << 8) | (0xA0
 // in the meantime set at resolution of a tile for a 16 x 9 tilemap on 1920x1080 display
 static const int tileResolution = 120;
 
-// TODO: get mouse input working to allow a tile to be select and then switched with another tile
-// TODO: make sure dfs is actually working (taking capping into account)
+// TODO: allow sources to have multiple sinks and detect (and disallow) the mixing of sources
 // TODO: allow sources to be special tiles
 int main(int argc, char *argv[]) {
 
@@ -331,88 +330,16 @@ int main(int argc, char *argv[]) {
                     SDL_RenderCopy(engine.renderer, highlightTexture, NULL, &destRect);
                 }
 
-                // TEMP: check puzzle here
-                // This is just DFS with annoying edge conditions and unique tiles special cases -.-
-                // TEMP: explicitly define sources and and sinks
-
                 if (checkPuzzle) {
-                    Tilemap<PuzzleTile> *puzzlemap = game.puzzleTilemap;
-                    pair source = pair{2, 13};
-                    // pair source = pair{4, 0};
-
-                    pair sink = pair{1, 15};
-                    // pair sink = pair{4, 4};
-                    bool *visited = new bool[puzzlemap->tilesVert * puzzlemap->tilesHorz];
-                    // zero out the array
-                    std::memset(visited, 0, puzzlemap->tilesVert * puzzlemap->tilesHorz);
-                    // row size for 2d indexing
-                    int rs = puzzlemap->tilesHorz;
-
-                    pair *stack = new pair[puzzlemap->tilesVert * puzzlemap->tilesHorz];
-                    stack[0] = source;
-                    int currentIndex = 0;
-                    bool hitSink = false;
-
-                    visited[source.r * rs + source.c] = true;
-
-                    while (currentIndex >= 0 && !hitSink) {
-                        pair currentPair;
-                        PuzzleTile *currentTile;
-                        currentPair = stack[currentIndex];
-                        currentTile = puzzlemap->get(currentPair.r, currentPair.c);
-                        currentIndex--;
-                        // left
-                        if (currentTile->openLeft() && currentPair.c - 1 > 0 && !visited[currentPair.r * rs + currentPair.c - 1]) {
-                            PuzzleTile *nextTile = puzzlemap->get(currentPair.r, currentPair.c - 1);
-                            if (nextTile->isSpecial || nextTile->openRight()) {
-                                visited[currentPair.r * rs + currentPair.c - 1] = true;
-                                currentIndex++;
-                                stack[currentIndex] = nextTile->indices;
-                                hitSink = hitSink || sink == nextTile->indices;
-                            }
-                            
-                        }
-                        // up
-                        if (currentTile->openUp() && currentPair.r - 1 > 0 && !visited[(currentPair.r - 1) * rs + currentPair.c]) {
-                            PuzzleTile *nextTile = puzzlemap->get(currentPair.r - 1, currentPair.c);
-                            if (nextTile->isSpecial || nextTile->openDown()) {
-                                visited[(currentPair.r - 1) * rs + currentPair.c] = true;
-                                currentIndex++;
-                                stack[currentIndex] = nextTile->indices;
-                                hitSink = hitSink || sink == nextTile->indices;
-                            }
-                        }
-                        // right
-                        if (currentTile->openRight() && currentPair.c + 1 > 0 && !visited[currentPair.r * rs + currentPair.c + 1]) {
-                            PuzzleTile *nextTile = puzzlemap->get(currentPair.r, currentPair.c + 1);
-                            if (nextTile->isSpecial || nextTile->openLeft()) {
-                                visited[currentPair.r * rs + currentPair.c + 1] = true;
-                                currentIndex++;
-                                stack[currentIndex] = nextTile->indices;
-                                hitSink = hitSink || sink == nextTile->indices;
-                            }
-                        }
-                        // down
-                        if (currentTile->openDown() && currentPair.r + 1 > 0 && !visited[(currentPair.r + 1) * rs + currentPair.c]) {
-                            PuzzleTile *nextTile = puzzlemap->get(currentPair.r + 1, currentPair.c);
-                            if (nextTile->isSpecial || nextTile->openUp()) {
-                                visited[(currentPair.r + 1) * rs + currentPair.c] = true;
-                                currentIndex++;
-                                stack[currentIndex] = nextTile->indices;
-                                hitSink = hitSink || sink == nextTile->indices;
-                            }
-                        }
+                    bool validSolution = true;
+                    for (int i = 0; i < game.numSourceSinks; i++) {
+                        validSolution = validSolution && hasSourceSinkPath(game.sources[i], game.sinks[i], game.puzzleTilemap);
                     }
-                    if (hitSink) {
+                    if (validSolution) {
                         printf("Succesfully hit sink\n");
                     } else {
                         printf("Failed to hit sink\n");
                     }
-                    
-                    // cleanup
-                    delete visited;
-                    delete stack;
-
                 }
                 break;
         }
@@ -457,8 +384,8 @@ int main(int argc, char *argv[]) {
 
 void initEngine(Engine *engine) {
     // initialize Engine struct
-    engine->screenWidth = 1024; // 1920;
-    engine->screenHeight = 768; // 1080;
+    engine->screenWidth = 1920;
+    engine->screenHeight = 1080;
 
     // initialize SDL and make a window
     SDL_Init(SDL_INIT_VIDEO);
@@ -550,6 +477,16 @@ void initGameState(GameState *game) {
     puzzleTilemap->tilesVert = 9;
     puzzleTilemap->tilesHorz = 16;
     puzzleTilemap->tiles = new PuzzleTile[puzzleTilemap->tilesHorz * puzzleTilemap->tilesVert];
+
+    game->sources = new pair[3];
+    game->sources[0] = pair{2, 13};
+    game->sources[1] = pair{4, 0};
+    game->sources[2] = pair{4, 0};
+    game->sinks = new pair[3];
+    game->sinks[0] = pair{1, 15};
+    game->sinks[1] = pair{4, 7};
+    game->sinks[2] = pair{6, 12};
+    game->numSourceSinks = 3;
 
     for (int i = 0; i < puzzleTilemap->tilesVert; i++) {
         for (int j = 0; j < puzzleTilemap->tilesHorz; j++) {
@@ -748,4 +685,80 @@ bool canMoveTo(pair dest, pair source, Tilemap<PuzzleTile> *tilemap) {
 
     return toRet;
 
+}
+
+bool hasSourceSinkPath(pair source, pair sink, Tilemap<PuzzleTile> *puzzlemap) {
+
+    // row size for 2d indexing
+    int rs = puzzlemap->tilesHorz;
+
+    // use iterative DFS with a stack
+    pair *stack = new pair[puzzlemap->tilesVert * puzzlemap->tilesHorz];
+    // initialize stack
+    stack[0] = source;
+    int currentIndex = 0;
+
+    // use a 2d array of bools to avoid infinite DFS loop when graph has cycles
+    bool *visited = new bool[puzzlemap->tilesVert * puzzlemap->tilesHorz];
+    // zero out the array except for the source
+    std::memset(visited, 0, puzzlemap->tilesVert * puzzlemap->tilesHorz);
+    visited[source.r * rs + source.c] = true;
+
+    bool hitSink = false;
+
+    while (currentIndex >= 0 && !hitSink) {
+        pair currentPair;
+        PuzzleTile *currentTile;
+        currentPair = stack[currentIndex];
+        currentTile = puzzlemap->get(currentPair.r, currentPair.c);
+        currentIndex--;
+        // left
+        if (currentTile->openLeft() && currentPair.c - 1 > 0 && !visited[currentPair.r * rs + currentPair.c - 1]) {
+            PuzzleTile *nextTile = puzzlemap->get(currentPair.r, currentPair.c - 1);
+            if (nextTile->isSpecial || nextTile->openRight()) {
+                visited[currentPair.r * rs + currentPair.c - 1] = true;
+                currentIndex++;
+                stack[currentIndex] = nextTile->indices;
+                hitSink = hitSink || sink == nextTile->indices;
+            }
+            
+        }
+        // up
+        if (currentTile->openUp() && currentPair.r - 1 > 0 && !visited[(currentPair.r - 1) * rs + currentPair.c]) {
+            PuzzleTile *nextTile = puzzlemap->get(currentPair.r - 1, currentPair.c);
+            if (nextTile->isSpecial || nextTile->openDown()) {
+                visited[(currentPair.r - 1) * rs + currentPair.c] = true;
+                currentIndex++;
+                stack[currentIndex] = nextTile->indices;
+                hitSink = hitSink || sink == nextTile->indices;
+            }
+        }
+        // right
+        if (currentTile->openRight() && currentPair.c + 1 > 0 && !visited[currentPair.r * rs + currentPair.c + 1]) {
+            PuzzleTile *nextTile = puzzlemap->get(currentPair.r, currentPair.c + 1);
+            if (nextTile->isSpecial || nextTile->openLeft()) {
+                visited[currentPair.r * rs + currentPair.c + 1] = true;
+                currentIndex++;
+                stack[currentIndex] = nextTile->indices;
+                hitSink = hitSink || sink == nextTile->indices;
+            }
+        }
+        // down
+        if (currentTile->openDown() && currentPair.r + 1 > 0 && !visited[(currentPair.r + 1) * rs + currentPair.c]) {
+            PuzzleTile *nextTile = puzzlemap->get(currentPair.r + 1, currentPair.c);
+            if (nextTile->isSpecial || nextTile->openUp()) {
+                visited[(currentPair.r + 1) * rs + currentPair.c] = true;
+                currentIndex++;
+                stack[currentIndex] = nextTile->indices;
+                hitSink = hitSink || sink == nextTile->indices;
+            }
+        }
+    }
+
+    // cleanup
+    delete visited;
+    delete stack;
+
+    return hitSink;
+   
 }
