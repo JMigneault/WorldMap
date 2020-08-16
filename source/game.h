@@ -1,10 +1,11 @@
+#include "levels.h"
+#include "constants.h"
 #include "..\libraries\SDL2\include\SDL.h"
 #include <math.h>
 #include <cstring>
 
 // (Possible) TODO: replace common width/height format w/ a rect struct (containing width, height, v2 center)
 
-SDL_Surface *DebugMakeRectSurface(int w, int h, int color);
 
 struct v2 {
     float x, y;
@@ -22,17 +23,67 @@ inline bool operator==(pair x, pair y) {
     return x.r == y.r && x.c == y.c;
 }
 
+struct Sprite {
+    // image
+    SDL_Texture *texture;
+
+    // In game units
+    float width;
+    float height;
+
+    // placed at the center of the entity
+    v2 center;
+};
+
+struct Animation {
+    Sprite *sprites;   
+    int numSprites;
+    // TODO: advance animations by frame time instead of framerate
+    int framesPerImage;
+
+    int currentSprite;
+    int currentFrame;
+
+    Animation() : currentSprite(0), currentFrame(1) {}
+};
+
+struct Animator {
+    Animation *animations;
+
+    int currentAnimation;
+    bool isAnimating;
+
+    Animator() : currentAnimation(0), isAnimating(false) {}
+
+    Animation *getCurrentAnimation() {
+        return &animations[currentAnimation];
+    };
+
+    Sprite *currentSprite() {
+        return &animations[currentAnimation].sprites[animations[currentAnimation].currentSprite];
+    };
+
+    void stopAnimating() {
+        isAnimating = false;
+        animations[currentAnimation].currentSprite = 0;
+    }
+
+};
+
 struct Entity {
     int id;
+    // physics
     v2 position;
     v2 velocity;
     float speed;
+
     float width;
     float height;
-    SDL_Texture *texture;
-    // more physics?
-    // animator
-    // TODO
+
+    Animator animator;
+
+    // TEMP: bind entities to puzzles (should be in Towns)
+    int puzzleNumber = -1;
 };
 
 struct Town : public Entity {
@@ -88,7 +139,9 @@ struct Tilemap {
     }
 
     inline void Tilemap::set(int row, int col, T *newTile) {
+        pair oldIndices = tiles[row * tilesHorz + col].indices;
         tiles[row * tilesHorz + col] = *newTile;
+        tiles[row * tilesHorz + col].indices = oldIndices;
     }
 
     void Tilemap::renderTilemap(Engine *engine);
@@ -97,8 +150,8 @@ struct Tilemap {
 template <class T>
 void Tilemap<T>::renderTilemap(Engine *engine) {
     Camera *camera = engine->activeCamera;
-    int startingRow = (int)(camera->position.y);
-    int startingCol = (int)(camera->position.x);
+    int startingRow = (int)(camera->position.y - 1);
+    int startingCol = (int)(camera->position.x - 1);
     // add 1 so that the cast rounds up
     int endingRow = (int)(camera->position.y + camera->height + 1);
     int endingCol = (int)(camera->position.x + camera->width + 1);
@@ -110,10 +163,10 @@ void Tilemap<T>::renderTilemap(Engine *engine) {
             destRect.y = roundFloatToInt(((float)i - camera->position.y) * engine->unitHeight());
             destRect.w = roundFloatToInt(engine->unitWidth());
             destRect.h = roundFloatToInt(engine->unitHeight());
+
             if (j < tilesHorz && j >= 0 && i < tilesVert && i >= 0) {
                 SDL_RenderCopy(engine->renderer, get(i, j)->texture, NULL, &destRect);
             } else {
-                // TODO: display blackness for out of bounds
                 SDL_RenderCopy(engine->renderer, get(0, 0)->texture, NULL, &destRect);
             }
         }
@@ -202,6 +255,18 @@ void PuzzleTile::parseCode(int tileCode) {
     }
 }
 
+// TODO: is this struct necessary?
+struct Goal {
+    pair source;
+    pair sink;
+};
+
+struct Puzzle {
+    Tilemap<PuzzleTile> *tilemap;
+    Goal *goals;
+    int numGoals;
+};
+
 enum GameMode { worldMode, puzzleMode };
 
 struct TileSelection {
@@ -214,14 +279,16 @@ struct GameState {
     GameMode mode;
     Camera worldCamera;
     Camera puzzleCamera;
-    Tilemap<WorldTile> *worldTilemap;
-    // TEMP: make puzzle struct?
-    Tilemap<PuzzleTile> *puzzleTilemap;
-    pair *sources;
-    pair *sinks;
-    int numSourceSinks;
 
+    Tilemap<WorldTile> *worldTilemap;
+
+    // TODO: encapsulate this?
+    Puzzle *puzzles;
+    int currentPuzzle;
+    // TEMP:
+    SDL_Texture *highlightTexture;
     TileSelection selection;
+
     // an array of entity pointers
     Entity *entities[1000]; // TODO: estimate max number of entities
     int numEntities;
@@ -229,13 +296,17 @@ struct GameState {
 };
 
 void initEngine(Engine *engine);
-void initGameState(GameState *game);
+void initGameState(GameState *game, Engine *engine);
 float testCollision(float dT, Entity *colliding, v2 testPosition, float testWidth, float testHeight);
 void renderTilemap(Engine *engine, Tilemap<Tile> *tilemap);
 void worldModeUpdate(GameState *game, Engine *engine);
 void drawEntities(Engine *engine, Entity **entities, int numEntities);
 bool canMoveTo(pair dest, pair source, Tilemap<PuzzleTile> *tilemap);
-bool hasSourceSinkPath(pair source, pair sink, Tilemap<PuzzleTile> *puzzlemap);
+bool hasSourceSinkPath(Goal goal, Tilemap<PuzzleTile> *puzzlemap);
+void initPuzzle(Puzzle *puzzle, const int puzzleTemplate[PUZZLEHEIGHT][PUZZLEWIDTH], const int *puzzleSourceRows, const int *puzzleSourceCols, const int *puzzleSinkRows, const int *puzzleSinkCols, const int numGoals);
+void initAnimator(SDL_Renderer *renderer, Animator *animator, int numAnimations, const int *animationSizes, const char **bmps, int framesPerSprite, float pixelsPerUnit, const int *pixelCentersX, const int *pixelCentersY);
+SDL_Surface *DebugMakeRectSurface(int w, int h, int color);
+void DebugBuildTilemapTextures(Tilemap<PuzzleTile> *puzzleTilemap, Engine *engine);
 
 // NOTE: this provides an alias to reference player (entity 0)
 inline Player *GameState::player(void) {

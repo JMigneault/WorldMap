@@ -1,62 +1,303 @@
 #include "game.h"
 #include "..\libraries\SDL2\include\SDL.h"
 #include <stdio.h>
-// for memset
 #include <cstring>
 
-// AABBGGRR: NOTE: alpha is "opaqueness" so must be set to 255 to see colors
-static const int dark = (0xFF << 24) | (0x00 << 16) | (0x00 << 8) | (0xFF << 0);
-static const int light = (0xFF << 24) | (0xFF << 16) | (0xFF << 8) | (0x00 << 0);
-static const int cutscene = (0xFF << 24) | (0xFF << 16) | (0xFF << 8) | (0xFF << 0);
-
-static const int highlightColor = (0x55 << 24) | (0xFF << 16) | (0xFF << 8) | (0xFF << 0);
-
-// todo: will need object representation for player eventually (to manage sprites for example)
-static const int playerColor = (0xFF << 24) | (0xA0 << 16) | (0x00 << 8) | (0xA0 << 0);
-
-// TEMP: eventually should be determined by art assets themselves
-// in the meantime set at resolution of a tile for a 16 x 9 tilemap on 1920x1080 display
-static const int tileResolution = 120;
+// TODO LIST OF TASKS TODO
+// TODO: - Finish granular level design (fill out small blocks) 
+// TODO: - Add progress text (0/4 puzzles completed - squares change color on puzzle completion)
+// TODO: - Fix player animation
+// TODO: - Clarify Puzzle goals, add pipe sprites, etc.
+// TODO END TASK LIST TODO
 
 // TODO: allow sources to have multiple sinks and detect (and disallow) the mixing of sources
 // TODO: allow sources to be special tiles
+// TODO: fix memory management!
+
+// TODO: towns sometimes do not appear!
+
+enum Direction {LEFT, UP, RIGHT, DOWN};
+
+static bool leftPressed = false;
+static bool upPressed = false;
+static bool rightPressed = false;
+static bool downPressed = false;
+
+static bool walking = false;
+
+// TEMP: global vars for animating
+static int frameCounter = 0;
+
+// TODO: add player animation control
 int main(int argc, char *argv[]) {
 
+    printf("STARTING\n");
     struct GameState game;
     struct Engine engine;
 
-    initGameState(&game);
     initEngine(&engine);
+    initGameState(&game, &engine);
 
-    SDL_Surface *cutsceneSurface = DebugMakeRectSurface(engine.screenWidth, engine.screenHeight, cutscene);
-    SDL_Texture *cutsceneTexture = SDL_CreateTextureFromSurface(engine.renderer, cutsceneSurface);
+    while(true) {
+        // main loop
+        Uint64 frameStartCounter = SDL_GetPerformanceCounter();
 
-    // TEMP: for making example puzzle
-    game.mode = puzzleMode;
+        bool quit = false;
 
-    // START TEMP LOADING CODE
-    // TEMP: build some other entities for testing
-    SDL_Surface *entitySurface = DebugMakeRectSurface(.5 * tileResolution, .5 * tileResolution, cutscene);
-    SDL_Texture *entityTexture = SDL_CreateTextureFromSurface(engine.renderer, entitySurface);
-    game.entities[1] = new Entity;
-    game.entities[1]->id = 2;
-    game.entities[1]->position = v2{9, 5};
-    game.entities[1]->velocity = v2{-1.0, 0};
-    game.entities[1]->width = .5;
-    game.entities[1]->height = .5;
-    game.entities[1]->speed = .5;
-    game.entities[1]->texture = entityTexture;
-    game.numEntities = 2;
+        // TEMP: institute puzzle checking
+        bool checkPuzzle = false;
+
+        // handle input
+        // TODO: make input handling generic; overhaul input system
+        SDL_Event event;
+        bool foundEvent = true;
+        while (foundEvent) {
+            foundEvent = SDL_PollEvent(&event);
+            if (foundEvent) {
+                switch(event.type) {
+                    case SDL_QUIT:
+                        quit = true;
+                        break;
+                    case SDL_KEYDOWN:
+                        switch(event.key.keysym.sym) {
+                            // TEMP: just remember/lookup animation indices
+                            case SDLK_a:
+                                leftPressed = true;
+                                break;
+                            case SDLK_w:
+                                upPressed = true;
+                                break;
+                            case SDLK_d:
+                                rightPressed = true;
+                                break;
+                            case SDLK_s:
+                                downPressed = true;
+                                break;
+                            // TEMP: Close puzzle window
+                            case SDLK_f:
+                                game.mode = worldMode;
+                                break;
+                            // TEMP: check puzzle when p is pressed
+                            case SDLK_p:
+                                checkPuzzle = true;
+                                break;
+                            // TEMP: test puzzles
+                            case SDLK_1:
+                                game.currentPuzzle = 0;
+                                break;
+                            case SDLK_2:
+                                game.currentPuzzle = 1;
+                                break;
+                            case SDLK_3:
+                                game.currentPuzzle = 2;
+                                break;
+                            case SDLK_4:
+                                game.currentPuzzle = 3;
+                                break;
+                       }
+                       break;
+ 
+                    case SDL_KEYUP:
+                         switch(event.key.keysym.sym) {
+                            case SDLK_w:
+                                upPressed = false;
+                                break;
+                            case SDLK_a:
+                                leftPressed = false;
+                                break;
+                            case SDLK_s:
+                                downPressed = false;
+                                break;
+                            case SDLK_d:
+                                rightPressed = false;
+                                break;
+                        }
+                        break;              
+ 
+                  case SDL_MOUSEBUTTONDOWN:
+                        switch(event.button.button) {
+                            case SDL_BUTTON_LEFT:
+                                // select or switch tile
+                                if (game.mode == puzzleMode) {
+                                    // todo
+                                    // TODO (?): camera to world space function 
+                                    int col = event.button.x / engine.unitWidth() - engine.activeCamera->position.x;
+                                    int row = event.button.y / engine.unitHeight() - engine.activeCamera->position.y;
+                                    PuzzleTile *tile = game.puzzles[game.currentPuzzle].tilemap->get(row, col);
+                                    if (tile->movable) {
+                                        if (!game.selection.hasSelection) {
+                                            game.selection.hasSelection = true;
+                                            game.selection.coords = pair{row, col};
+                                        } else {
+                                            pair first = game.selection.coords;
+                                            pair second = pair{row, col};
+                                            if (canMoveTo(first, second, game.puzzles[game.currentPuzzle].tilemap) 
+                                                && canMoveTo(second, first, game.puzzles[game.currentPuzzle].tilemap)) {
+                                                game.selection.hasSelection = false;
+                                                PuzzleTile temp = *tile;
+                                                game.puzzles[game.currentPuzzle].tilemap->set(row, col, game.puzzles[game.currentPuzzle].tilemap->get(game.selection.coords.r, game.selection.coords.c));
+                                                game.puzzles[game.currentPuzzle].tilemap->set(game.selection.coords.r, game.selection.coords.c, &temp);
+                                            }
+                                        }
+                                    }
+                                }
+                                break;
+                        }
+                        break;
+                }
+            }
+        }
+
+        if (quit) {
+            break;
+        }
+
+        switch (game.mode) {
+            case worldMode:
+                engine.activeCamera = &game.worldCamera;
+                worldModeUpdate(&game, &engine);
+                game.worldTilemap->renderTilemap(&engine);
+
+                // Update animations
+                for (int i = 0; i < game.numEntities; i++) {
+                    // TEMP: manually advance animation
+                    Animation *animation = &game.entities[i]->animator.animations[game.entities[i]->animator.currentAnimation];
+                    if (game.entities[i]->animator.isAnimating) {
+                        if (animation->currentFrame == animation->framesPerImage) {
+                            animation->currentSprite = (animation->currentSprite + 1) % animation->numSprites;
+                            animation->currentFrame = 1;
+                        }
+                        animation->currentFrame++;
+                    }
+                }
+                
+                drawEntities(&engine, game.entities, game.numEntities);
+                break;
+
+            case puzzleMode:
+                engine.activeCamera = &game.puzzleCamera;
+                game.puzzles[game.currentPuzzle].tilemap->renderTilemap(&engine);
+
+                // TEMP: highlight selected tile
+                if (game.selection.hasSelection) {
+                    SDL_Rect destRect;
+                    destRect.x = roundFloatToInt(((float)game.selection.coords.c - engine.activeCamera->position.x) * engine.unitWidth());
+                    destRect.y = roundFloatToInt(((float)game.selection.coords.r - engine.activeCamera->position.y) * engine.unitHeight());
+                    destRect.w = roundFloatToInt(engine.unitWidth());
+                    destRect.h = roundFloatToInt(engine.unitHeight());
+                    SDL_RenderCopy(engine.renderer, game.highlightTexture, NULL, &destRect);
+                }
+
+                if (checkPuzzle) {
+                    bool validSolution = true;
+                    for (int i = 0; i < game.puzzles[game.currentPuzzle].numGoals; i++) {
+                        validSolution = validSolution && hasSourceSinkPath(game.puzzles[game.currentPuzzle].goals[i], game.puzzles[game.currentPuzzle].tilemap);
+                    }
+                    // TEMP: write to console
+                    // TODO: gameplay consequences of solving puzzle
+                    if (validSolution) {
+                        printf("Succesfully hit sink\n");
+                    } else {
+                        printf("Failed to hit sink\n");
+                    }
+                }
+                break;
+        }
+
+        // wait to target framerate
+        Uint64 waitStartCounter = SDL_GetPerformanceCounter(); 
+        
+        // put thread to sleep for the amount of time until the target leaving 2ms to spare
+        int waitTimeTargetMS = (int)(1000 * (engine.frametimeTarget - ((double)(waitStartCounter - frameStartCounter) / (double)SDL_GetPerformanceFrequency())) - 2);
+        if (waitTimeTargetMS > 0) {
+            SDL_Delay(waitTimeTargetMS);
+        }
+
+        // display screen and then explicitly wait until we hit the frame target
+        Uint64 waitEndCounter = SDL_GetPerformanceCounter();
+        Uint64 frameEndCounter = (Uint64)(engine.frametimeTarget * (float)SDL_GetPerformanceFrequency()) + frameStartCounter;
+        SDL_RenderPresent(engine.renderer);
+        while (SDL_GetPerformanceCounter() < frameEndCounter) { }
+
+        // TEMP: for animating player
+        frameCounter++;
+    }
+
+    // cleanup allocated memory
+    for (int i = 0; i < game.numEntities; i++) {
+        delete game.entities[i];
+    }
+
+    // memory cleanup
+    // TODO: fix/make more comprehensive
+    SDL_DestroyRenderer(engine.renderer);
+    SDL_DestroyWindow(engine.window);
+    SDL_Quit();
+
+	return 0;
+}
+
+void initEngine(Engine *engine) {
+    // initialize Engine struct
+    engine->screenWidth = SCREENWIDTH;
+    engine->screenHeight = SCREENHEIGHT;
+
+    // initialize SDL and make a window
+    SDL_Init(SDL_INIT_VIDEO);
+    engine->window = SDL_CreateWindow("WorldMap", 0, 0, engine->screenWidth, engine->screenHeight, SDL_WINDOW_FULLSCREEN);
+    engine->renderer = SDL_CreateRenderer(engine->window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+
+    // enable transparency rendering
+    SDL_SetRenderDrawBlendMode(engine->renderer, SDL_BLENDMODE_BLEND);
+
+    // find refresh rate to set target framerate
+    SDL_DisplayMode display;
+    
+    if (SDL_GetCurrentDisplayMode(0, &display) == 0) {
+        engine->refreshRate = display.refresh_rate;
+    } else {
+        engine->refreshRate = 60;
+    }
+    engine->frametimeTarget = 1.0 / (float)engine->refreshRate;
+}
+
+void initGameState(GameState *game, Engine *engine) {
+
+    // initialize cameras
+    game->worldCamera.height = WORLDCAMERAHEIGHT;
+    game->worldCamera.width = WORLDCAMERAWIDTH;
+    // world camera position should be set to player position before first render anyways
+    // position is top left corner of camera (double check this)
+    game->worldCamera.position = v2{};
+
+    game->puzzleCamera.height = PUZZLECAMERAHEIGHT;
+    game->puzzleCamera.width = PUZZLECAMERAWIDTH;
+    game->puzzleCamera.position = v2{0,0};
+
+    // Make world tilemap
+    Tilemap<WorldTile> *worldTilemap = new Tilemap<WorldTile>;
+
+    game->worldTilemap = worldTilemap;
+    worldTilemap->tilesVert = WORLDHEIGHT;
+    worldTilemap->tilesHorz = WORLDWIDTH;
+    worldTilemap->tiles = new WorldTile[worldTilemap->tilesVert * worldTilemap->tilesHorz];
 
     // Make textures for background and player
-    SDL_Surface *lightSurface = DebugMakeRectSurface(roundFloatToInt(tileResolution), roundFloatToInt(tileResolution), light);
-    SDL_Surface *darkSurface = DebugMakeRectSurface(roundFloatToInt(tileResolution), roundFloatToInt(tileResolution), dark);
-    SDL_Texture *lightTexture = SDL_CreateTextureFromSurface(engine.renderer, lightSurface);
-    SDL_Texture *darkTexture = SDL_CreateTextureFromSurface(engine.renderer, darkSurface);
-    // TODO: make this less messy, right now we need to loop through each tile again to add textures
-    for (int i = 0; i < game.worldTilemap->tilesVert; i++) {
-        for (int j = 0; j < game.worldTilemap->tilesHorz; j++) {
-            WorldTile *tile = game.worldTilemap->get(i, j);
+    // Textures are reused (1 texture for dark, 1 for light tiles)
+    SDL_Surface *lightSurface = DebugMakeRectSurface(TILERES, TILERES, light);
+    SDL_Surface *darkSurface = DebugMakeRectSurface(TILERES, TILERES, dark);
+    SDL_Texture *lightTexture = SDL_CreateTextureFromSurface(engine->renderer, lightSurface);
+    SDL_Texture *darkTexture = SDL_CreateTextureFromSurface(engine->renderer, darkSurface);
+
+    SDL_FreeSurface(lightSurface);
+    SDL_FreeSurface(darkSurface);
+
+    // use explicitly defined world template to build worldTilemap
+    for (int i = 0; i < worldTilemap->tilesVert; i++) {
+        for (int j = 0; j < worldTilemap->tilesHorz; j++) {
+            WorldTile *tile = worldTilemap->get(i, j);
+            tile->blocked = worldTemplate[i][j];
+            tile->town = NULL;
             if (tile->blocked) {
                 tile->texture = darkTexture;
             } else {
@@ -65,29 +306,205 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // TEMP: add a town for testing
-    Town *town = new Town;
-    game.worldTilemap->get(1, 1)->town = town;
-    town->position = v2{1.5, 1.5};
-    town->width = .5;
-    town->height = .5;
-    town->texture = entityTexture;
-    town->id = 3;
-    game.entities[2] = town;
-    game.numEntities = 3;
+    // Create the player
+    Player *player = new Player;
 
-    SDL_Surface *playerSurface = DebugMakeRectSurface(game.player()->width * tileResolution, game.player()->height * tileResolution, playerColor);
-    SDL_Texture *playerTexture = SDL_CreateTextureFromSurface(engine.renderer, playerSurface);
-    game.player()->texture = playerTexture;
+    initAnimator(engine->renderer, &player->animator, NUMPLAYERANIMATIONS, PLAYERANIMATIONSIZES, PLAYERBMPS, PLAYERFRAMESPERSPRITE, PLAYERPIXELSPERUNIT, PLAYERPIXELCENTERSX, PLAYERPIXELCENTERSY);  
+
+    player->position = v2{PLAYERPOSX, PLAYERPOSY};
+    player->velocity = v2{0, 0};
+    player->speed = PLAYERSPEED;
+
+    player->width = PLAYERWIDTH;
+    player->height = PLAYERHEIGHT;
+
+    player->id = 0;
+    game->entities[0] = player;
+    game->numEntities = 1;
+
+    // TEMP: build textures for towns
+    SDL_Surface *townSurface = DebugMakeRectSurface(.5 * TILERES, .5 * TILERES, cutscene);
+    SDL_Texture *townTexture = SDL_CreateTextureFromSurface(engine->renderer, townSurface);
+    SDL_FreeSurface(townSurface);
+
+    // Create 4 towns
+    // TODO: first town has disappeared
+    for (int i = 0; i < 4; i++) {
+        Town *town = new Town;
+
+        town->animator.currentAnimation = 0;
+        town->animator.isAnimating = false;
+
+        Animation *animation = new Animation;
+        town->animator.animations = animation;
+
+        animation->sprites = new Sprite;
+        animation->numSprites = 1;
+        animation->currentSprite = 0;
+        animation->framesPerImage = 15;
+
+        animation->sprites[0].texture = townTexture;
+        animation->sprites[0].width = TOWNWIDTH;
+        animation->sprites[0].height = TOWNHEIGHT;
+        animation->sprites[0].center = v2{TOWNWIDTH / 2, TOWNHEIGHT / 2};
+
+        town->width = TOWNWIDTH;
+        town->height = TOWNHEIGHT;
+        // TEMP:
+        town->position = v2{ALLTOWNPOSX[i], ALLTOWNPOSY[i]};
+        town->puzzleNumber = i;
+        town->id = i + 1;
+        game->entities[town->id] = town;
+        game->numEntities++;
+    }
+
+    // TODO: free memory
+    Puzzle *puzzles = new Puzzle[NUMPUZZLES];
+    // TEMP:
+    game->puzzles = puzzles;
+    game->currentPuzzle = -1;
+
+    // Change when more puzzles are added
+    initPuzzle(&(puzzles[0]), puzzleOneTemplate, puzzleOneSourceRows, puzzleOneSourceCols, puzzleOneSinkRows, puzzleOneSinkCols, puzzleOneNumGoals); 
+    initPuzzle(&(puzzles[1]), puzzleTwoTemplate, puzzleTwoSourceRows, puzzleTwoSourceCols, puzzleTwoSinkRows, puzzleTwoSinkCols, puzzleTwoNumGoals); 
+    initPuzzle(&(puzzles[2]), puzzleThreeTemplate, puzzleThreeSourceRows, puzzleThreeSourceCols, puzzleThreeSinkRows, puzzleThreeSinkCols, puzzleThreeNumGoals); 
+    initPuzzle(&(puzzles[3]), puzzleFourTemplate, puzzleFourSourceRows, puzzleFourSourceCols, puzzleFourSinkRows, puzzleFourSinkCols, puzzleFourNumGoals); 
 
     // TEMP: bind highlight texture
-    SDL_Surface *highlightSurface = DebugMakeRectSurface(roundFloatToInt(tileResolution), roundFloatToInt(tileResolution), highlightColor);
-    SDL_Texture *highlightTexture = SDL_CreateTextureFromSurface(engine.renderer, highlightSurface);
+    SDL_Surface *highlightSurface = DebugMakeRectSurface(TILERES, TILERES, highlightColor);
+    SDL_Texture *highlightTexture = SDL_CreateTextureFromSurface(engine->renderer, highlightSurface);
+    SDL_FreeSurface(highlightSurface);
 
-    // TEMP: initialize example puzzle
-    // TODO: make pipes respect the borderSize pixel boundary for tiles
-    for (int i = 0; i < game.puzzleTilemap->tilesVert; i++) {
-        for (int j = 0; j < game.puzzleTilemap->tilesHorz; j++) {
+    game->highlightTexture = highlightTexture;
+    // NOTE: default "no tile selected" square is -1, -1
+    game->selection.hasSelection = false;
+
+    // TEMP: bind debug textures to puzzles
+    DebugBuildTilemapTextures(game->puzzles[0].tilemap, engine);
+    DebugBuildTilemapTextures(game->puzzles[1].tilemap, engine);
+    DebugBuildTilemapTextures(game->puzzles[2].tilemap, engine);
+    DebugBuildTilemapTextures(game->puzzles[3].tilemap, engine);
+
+    // TEMP: start game in world
+    game->mode = worldMode;
+}
+
+void initAnimator(SDL_Renderer *renderer, Animator *animator, int numAnimations, const int *animationSizes, const char **bmps, const int framesPerSprite, float pixelsPerUnit, const int *pixelCentersX, const int *pixelCentersY) {
+    animator->animations = new Animation[numAnimations];
+    // tracks position in 1d bmps array representing 2d info
+    int spriteOffset = 0;
+    for (int i = 0; i < numAnimations; i++) {
+        Animation *animation = &animator->animations[i];
+        animation->numSprites = animationSizes[i];
+        animation->framesPerImage = framesPerSprite;
+        animation->sprites = new Sprite[animation->numSprites];
+        for (int j = 0; j < animation->numSprites; j++) {
+            int sprIndex = spriteOffset + j;
+            // Load Texture
+            char fp[MAXFILEPATHLENGTH];
+            strcpy(fp, TLPATH);
+            strcat(fp, bmps[sprIndex]);
+            printf("%s\n", fp);
+            SDL_Surface *surface = SDL_LoadBMP(fp);
+            if (surface == NULL) {
+                printf(SDL_GetError());
+            }
+            animation->sprites[j].texture = SDL_CreateTextureFromSurface(renderer, surface);
+            animation->sprites[j].width = surface->w / pixelsPerUnit;
+            animation->sprites[j].height = surface->h / pixelsPerUnit;
+            animation->sprites[j].center = v2{pixelCentersX[sprIndex] / pixelsPerUnit, pixelCentersY[sprIndex] / pixelsPerUnit};
+
+            SDL_FreeSurface(surface);
+        }
+        spriteOffset += animationSizes[i];
+    }
+
+}
+ 
+
+void initPuzzle(Puzzle *puzzle, const int puzzleTemplate[PUZZLEHEIGHT][PUZZLEWIDTH], const int *puzzleSourceRows, const int *puzzleSourceCols, const int *puzzleSinkRows, const int *puzzleSinkCols, const int numGoals) {
+    puzzle->tilemap = new Tilemap<PuzzleTile>;
+    puzzle->tilemap->tilesVert = PUZZLEHEIGHT;
+    puzzle->tilemap->tilesHorz = PUZZLEWIDTH;
+    puzzle->tilemap->tiles = new PuzzleTile[puzzle->tilemap->tilesHorz * puzzle->tilemap->tilesVert];
+    for (int i = 0; i < puzzle->tilemap->tilesVert; i++) {
+        for (int j = 0; j < puzzle->tilemap->tilesHorz; j++) {
+            // Build the tile from its code by explicitly calling its constructor
+            PuzzleTile *tile = puzzle->tilemap->get(i, j);
+            tile->indices = pair{i,j};
+            tile->parseCode(puzzleTemplate[i][j]);
+        }
+    }
+
+    puzzle->numGoals = numGoals;
+    puzzle->goals = new Goal[numGoals];
+    for (int i = 0; i < numGoals; i++) {
+        puzzle->goals[i].source = pair{puzzleSourceRows[i], puzzleSourceCols[i]};
+        puzzle->goals[i].sink = pair{puzzleSinkRows[i], puzzleSinkCols[i]};
+    }
+};
+
+// Returns the minimum time between inputted dT and the time to one of the 4 walls of the object
+// we are testing for collision against. If return value < dT we collided with a the object.
+float testCollision(float dT, Entity *colliding, v2 testPosition, float testWidth, float testHeight) {
+    // TODO: clean up this code; make a generic edge checking function and check each edge w/ 4 function calls
+    // TODO: could instead return a "collision" struct with dT and other info (or NULL if no collision)
+    v2 velVector = colliding->speed * colliding->velocity.normalized();
+    // minkowski collision says we can add the radius of our colliding object to our object and then
+    // do raycasting
+    float lBound = testPosition.x - (testWidth + colliding->width) / 2.0;
+    float rBound = testPosition.x + (testWidth + colliding->width) / 2.0;
+    float tBound = testPosition.y - (testHeight + colliding->height) / 2.0;
+    float bBound = testPosition.y + (testHeight + colliding->height) / 2.0;
+    float minT = dT;
+    // left vert edge
+    if (velVector.x != 0) {
+        float x1T = (lBound - colliding->position.x) / velVector.x;
+        if (x1T > 0 && colliding->position.y + x1T * velVector.y >= tBound && colliding->position.y + x1T * velVector.y <= bBound) {
+            minT = x1T; 
+        }
+    }
+    // right vert edge
+    if (velVector.x != 0) {
+        float x2T = (rBound - colliding->position.x) / velVector.x;
+        if (x2T > 0 && colliding->position.y + x2T * velVector.y >= tBound && colliding->position.y + x2T * velVector.y <= bBound) {
+            minT = min(minT, x2T); 
+        }
+    }
+    // top horz edge
+    if (velVector.y != 0) {
+        float y1T = (tBound - colliding->position.y) / velVector.y;
+        if (y1T > 0 && colliding->position.x + y1T * velVector.x >= lBound && colliding->position.x + y1T * velVector.x <= rBound) {
+            minT = min(minT, y1T); 
+        }
+    }
+    // bottom horz edge
+    if (velVector.y != 0) {
+        float y2T = (bBound - colliding->position.y) / velVector.y;
+        if (y2T > 0 && colliding->position.x + y2T * velVector.x >= lBound && colliding->position.x + y2T * velVector.x <= rBound) {
+            minT = min(minT, y2T); 
+        }
+    }
+    return minT;
+
+}
+
+// debug function that makes a surface for a colored (AABBGGRR) rectangle
+SDL_Surface *DebugMakeRectSurface(int w, int h, int color) {
+    SDL_Surface *surface = SDL_CreateRGBSurface(0, w, h, 32,
+                                                 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
+    SDL_LockSurface(surface);
+    for (int i = 0; i < w * h; i++) {
+        *((int *)(surface->pixels) + i) = color;
+    }
+    SDL_UnlockSurface(surface);
+
+    return surface; 
+}
+
+void DebugBuildTilemapTextures(Tilemap<PuzzleTile> *puzzleTilemap, Engine *engine) {
+    for (int i = 0; i < puzzleTilemap->tilesVert; i++) {
+        for (int j = 0; j < puzzleTilemap->tilesHorz; j++) {
             int reactorColor = (0xFF << 24) | (0x00 << 16) | (0x00 << 8) | (0xFF << 0);
             int coolerColor = (0xFF << 24) | (0xFF << 16) | (0x00 << 8) | (0x00 << 0);
             int backgroundColor = (0xFF << 24) | (0x55 << 16) | (0x10 << 8) | (0x30 << 0);
@@ -95,7 +512,7 @@ int main(int argc, char *argv[]) {
             int cappedColor = (0xFF << 24) | (0x10 << 16) | (0x50 << 8) | (0x10 << 0);
             int borderSize = 3;
 
-            PuzzleTile *tile = game.puzzleTilemap->get(i,j);
+            PuzzleTile *tile = puzzleTilemap->get(i,j);
             // Start w/ black background
             // TODO (?): write border at the end instead of the beginning
             SDL_Surface *surface;
@@ -106,14 +523,14 @@ int main(int argc, char *argv[]) {
                 } else {
                     specialColor = reactorColor;
                 }
-                surface = DebugMakeRectSurface(tileResolution, tileResolution, specialColor);
+                surface = DebugMakeRectSurface(TILERES, TILERES, specialColor);
             } else {
                 // write background leaving black border
-                surface = DebugMakeRectSurface(tileResolution, tileResolution, backgroundColor);
-                SDL_Surface *pipeSource = DebugMakeRectSurface(tileResolution / 3.0, tileResolution / 3.0, pipeColor);
-                SDL_Surface *cappedSource = DebugMakeRectSurface(tileResolution / 3.0, tileResolution / 3.0, cappedColor);
-                int pieceWidth = tileResolution / 3.0;
-                int pieceHeight = tileResolution / 3.0;
+                surface = DebugMakeRectSurface(TILERES, TILERES, backgroundColor);
+                SDL_Surface *pipeSource = DebugMakeRectSurface(TILERES / 3.0, TILERES / 3.0, pipeColor);
+                SDL_Surface *cappedSource = DebugMakeRectSurface(TILERES / 3.0, TILERES / 3.0, cappedColor);
+                int pieceWidth = TILERES / 3.0;
+                int pieceHeight = TILERES / 3.0;
 
                 SDL_Rect rect;
                 // write to middle
@@ -178,465 +595,139 @@ int main(int argc, char *argv[]) {
                 // white
                 borderColor = cutscene;
             }
-            SDL_Surface *vertBorder = DebugMakeRectSurface(borderSize, tileResolution, borderColor);
-            SDL_Surface *horzBorder = DebugMakeRectSurface(tileResolution, borderSize, borderColor);
+            SDL_Surface *vertBorder = DebugMakeRectSurface(borderSize, TILERES, borderColor);
+            SDL_Surface *horzBorder = DebugMakeRectSurface(TILERES, borderSize, borderColor);
             // draw vertical borders
             SDL_Rect rect;
             rect.x = 0;
             rect.y = 0;
             rect.w = borderSize;
-            rect.h = tileResolution;
+            rect.h = TILERES;
             SDL_BlitSurface(vertBorder, NULL, surface, &rect);
-            rect.x = tileResolution - borderSize;
+            rect.x = TILERES - borderSize;
             SDL_BlitSurface(vertBorder, NULL, surface, &rect);
             // draw horizontal borders
             rect. x = 0;
-            rect.w = tileResolution;
+            rect.w = TILERES;
             rect.h = borderSize;
             SDL_BlitSurface(horzBorder, NULL, surface, &rect);
-            rect.y = tileResolution - borderSize;
+            rect.y = TILERES - borderSize;
             SDL_BlitSurface(horzBorder, NULL, surface, &rect);
 
-            tile->texture = SDL_CreateTextureFromSurface(engine.renderer, surface);
+            tile->texture = SDL_CreateTextureFromSurface(engine->renderer, surface);
         }
     }
- 
-    // END TEMP LOADING CODE
-
-    while(true) {
-        // main loop
-        Uint64 frameStartCounter = SDL_GetPerformanceCounter();
-
-        bool quit = false;
-
-        // TEMP: institute puzzle checking
-        bool checkPuzzle = false;
-
-        // handle input
-        // TODO: make input handling generic
-        SDL_Event event;
-        bool foundEvent = true;
-        while (foundEvent) {
-            foundEvent = SDL_PollEvent(&event);
-            if (foundEvent) {
-                switch(event.type) {
-                    case SDL_QUIT:
-                        quit = true;
-                        break;
-                    case SDL_KEYDOWN:
-                        switch(event.key.keysym.sym) {
-                            case SDLK_w:
-                                game.player()->velocity.y = -1;
-                                break;
-                            case SDLK_a:
-                                game.player()->velocity.x = -1;
-                                break;
-                            case SDLK_s:
-                                game.player()->velocity.y = 1;
-                                break;
-                            case SDLK_d:
-                                game.player()->velocity.x = 1;
-                                break;
-                            // TEMP: Close cutscene window
-                            case SDLK_f:
-                                game.mode = worldMode;
-                                break;
-                            // TEMP: check puzzle when p is pressed
-                            case SDLK_p:
-                                checkPuzzle = true;
-                                break;
-                       }
-                       break;
-                    case SDL_KEYUP:
-                         switch(event.key.keysym.sym) {
-                            case SDLK_w:
-                                if (game.player()->velocity.y < 0) {
-                                    game.player()->velocity.y = 0;
-                                }
-                                break;
-                            case SDLK_a:
-                                if (game.player()->velocity.x < 0) {
-                                    game.player()->velocity.x = 0;
-                                }
-                                break;
-                            case SDLK_s:
-                                if (game.player()->velocity.y > 0) {
-                                    game.player()->velocity.y = 0;
-                                }
-                                break;
-                            case SDLK_d:
-                                if (game.player()->velocity.x > 0) {
-                                    game.player()->velocity.x = 0;
-                                }
-                                break;
-                        }
-                        break;              
-                    case SDL_MOUSEBUTTONDOWN:
-                        switch(event.button.button) {
-                            case SDL_BUTTON_LEFT:
-                                // select or switch tile
-                                if (game.mode == puzzleMode) {
-                                    // todo
-                                    // TODO (?): camera to world space function 
-                                    int col = event.button.x / engine.unitWidth() - engine.activeCamera->position.x;
-                                    int row = event.button.y / engine.unitHeight() - engine.activeCamera->position.y;
-                                    PuzzleTile *tile = game.puzzleTilemap->get(row, col);
-                                    if (tile->movable) {
-                                        if (!game.selection.hasSelection) {
-                                            game.selection.hasSelection = true;
-                                            game.selection.coords = pair{row, col};
-                                        } else {
-                                            pair first = game.selection.coords;
-                                            pair second = pair{row, col};
-                                            if (canMoveTo(first, second, game.puzzleTilemap) 
-                                                && canMoveTo(second, first, game.puzzleTilemap)) {
-                                                game.selection.hasSelection = false;
-                                                PuzzleTile temp = *tile;
-                                                game.puzzleTilemap->set(row, col, game.puzzleTilemap->get(game.selection.coords.r, game.selection.coords.c));
-                                                game.puzzleTilemap->set(game.selection.coords.r, game.selection.coords.c, &temp);
-                                            }
-                                        }
-                                    }
-                                }
-                                break;
-                        }
-                        break;
-                }
-            }
-        }
-
-        if (quit) {
-            break;
-        }
-
-        switch (game.mode) {
-            case worldMode:
-                engine.activeCamera = &game.worldCamera;
-                worldModeUpdate(&game, &engine);
-                game.worldTilemap->renderTilemap(&engine);
-                drawEntities(&engine, game.entities, game.numEntities);
-                break;
-            case puzzleMode:
-                engine.activeCamera = &game.puzzleCamera;
-                game.puzzleTilemap->renderTilemap(&engine);
-
-                // Highlight selected tile
-                if (game.selection.hasSelection) {
-                    SDL_Rect destRect;
-                    destRect.x = roundFloatToInt(((float)game.selection.coords.c - engine.activeCamera->position.x) * engine.unitWidth());
-                    destRect.y = roundFloatToInt(((float)game.selection.coords.r - engine.activeCamera->position.y) * engine.unitHeight());
-                    destRect.w = roundFloatToInt(engine.unitWidth());
-                    destRect.h = roundFloatToInt(engine.unitHeight());
-                    SDL_RenderCopy(engine.renderer, highlightTexture, NULL, &destRect);
-                }
-
-                if (checkPuzzle) {
-                    bool validSolution = true;
-                    for (int i = 0; i < game.numSourceSinks; i++) {
-                        validSolution = validSolution && hasSourceSinkPath(game.sources[i], game.sinks[i], game.puzzleTilemap);
-                    }
-                    if (validSolution) {
-                        printf("Succesfully hit sink\n");
-                    } else {
-                        printf("Failed to hit sink\n");
-                    }
-                }
-                break;
-        }
-
-        // wait to target framerate
-        Uint64 waitStartCounter = SDL_GetPerformanceCounter(); 
-        
-        // put thread to sleep for the amount of time until the target leaving 2ms to spare
-        int waitTimeTargetMS = (int)(1000 * (engine.frametimeTarget - ((double)(waitStartCounter - frameStartCounter) / (double)SDL_GetPerformanceFrequency())) - 2);
-        if (waitTimeTargetMS > 0) {
-            SDL_Delay(waitTimeTargetMS);
-        }
-
-        // display screen and then explicitly wait until we hit the frame target
-        Uint64 waitEndCounter = SDL_GetPerformanceCounter();
-        Uint64 frameEndCounter = (Uint64)(engine.frametimeTarget * (float)SDL_GetPerformanceFrequency()) + frameStartCounter;
-        SDL_RenderPresent(engine.renderer);
-        while (SDL_GetPerformanceCounter() < frameEndCounter) { }
-    }
-
-    // cleanup allocated memory
-    for (int i = 0; i < game.numEntities; i++) {
-        delete game.entities[i];
-    }
-
-    SDL_FreeSurface(lightSurface);
-    SDL_FreeSurface(darkSurface);
-    SDL_FreeSurface(playerSurface);
-    SDL_FreeSurface(entitySurface);
-    SDL_FreeSurface(cutsceneSurface);
-    SDL_DestroyTexture(lightTexture);
-    SDL_DestroyTexture(darkTexture);
-    SDL_DestroyTexture(playerTexture);
-    SDL_DestroyTexture(entityTexture);
-    SDL_DestroyTexture(cutsceneTexture);
-    SDL_DestroyRenderer(engine.renderer);
-    SDL_DestroyWindow(engine.window);
-    SDL_Quit();
-
-	return 0;
-}
-
-void initEngine(Engine *engine) {
-    // initialize Engine struct
-    engine->screenWidth = 1920;
-    engine->screenHeight = 1080;
-
-    // initialize SDL and make a window
-    SDL_Init(SDL_INIT_VIDEO);
-    engine->window = SDL_CreateWindow("WorldMap", 100, 100, engine->screenWidth, engine->screenHeight, SDL_WINDOW_FULLSCREEN);
-    engine->renderer = SDL_CreateRenderer(engine->window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-
-    // find refresh rate to set target framerate
-    SDL_DisplayMode display;
-    
-    if (SDL_GetCurrentDisplayMode(0, &display) == 0) {
-        engine->refreshRate = display.refresh_rate;
-    } else {
-        engine->refreshRate = 60;
-    }
-    engine->frametimeTarget = 1.0 / (float)engine->refreshRate;
-}
-
-void initGameState(GameState *game) {
-
-    // initialize cameras
-    game->worldCamera.height = 4.5; //9.0;
-    game->worldCamera.width = 8.0; //16.0;
-    // world camera position should be set to player position before first render anyways
-    game->worldCamera.position = v2{0,0};
-
-    game->puzzleCamera.height = 9.0;
-    game->puzzleCamera.width = 16.0;
-    game->puzzleCamera.position = v2{0,0};
-
-    // initialize World struct
-    int worldTemplate[9][16] = {
-        {1, 1, 1, 1,  1, 1, 1, 1,  1, 0, 1, 0,  1, 1, 1, 1},
-        {1, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 1},
-        {1, 1, 1, 0,  0, 0, 0, 1,  1, 1, 1, 0,  0, 0, 1, 1},
-
-        {1, 1, 0, 1,  0, 0, 0, 0,  0, 0, 0, 0,  0, 1, 0, 1},
-        {1, 0, 0, 0,  1, 0, 0, 0,  0, 0, 0, 0,  1, 0, 0, 1},
-        {1, 1, 0, 0,  0, 1, 0, 0,  0, 0, 0, 1,  0, 0, 1, 1},
-
-        {1, 1, 0, 0,  0, 0, 1, 0,  0, 0, 1, 0,  0, 0, 1, 1},
-        {1, 0, 0, 0,  0, 0, 0, 1,  0, 1, 0, 0,  0, 0, 0, 1},
-        {1, 1, 0, 0,  0, 0, 0, 0,  1, 0, 0, 1,  1, 1, 1, 1},
-    };
-
-    // explicitly define tilemap for now
-    // TODO: refactor and malloc for tilemap
-    Tilemap<WorldTile> *worldTilemap = new Tilemap<WorldTile>;
-    // TODO: malloc array
-    game->worldTilemap = worldTilemap;
-    worldTilemap->tilesVert = 9;
-    worldTilemap->tilesHorz = 16;
-    worldTilemap->tiles = new WorldTile[worldTilemap->tilesVert * worldTilemap->tilesHorz];
-    for (int i = 0; i < worldTilemap->tilesVert; i++) {
-        for (int j = 0; j < worldTilemap->tilesHorz; j++) {
-            WorldTile *tile = worldTilemap->get(i, j);
-            tile->blocked = worldTemplate[i][j];
-            tile->town = NULL;
-        }
-    }
-
-    // Create the player
-    Player *player = new Player;
-    player->id = 0;
-    player->position = v2{8, 4.5};
-    player->velocity = v2{0, 0};
-    player->width = .5;
-    player->height = .5;
-    player->speed = 1.5;
-    game->entities[0] = player;
-    game->numEntities = 1;
-    // TODO: free memory
-    // TODO: add differentiation between movable tiles and start adding functionality
-    int puzzleTemplate[9][16] = {
-        {0, 0, 0, 0,  0, 0, 0, 0,  0, 20, 0, 0,    0, 0, 0, 0},
-        {0, 0, 0, 0,  0, 0, 0, 0,  0, 20, 0, 42,  10, 154 + 512, 10, 10},
-        {0, 0, 0, 0,  0, 0, 0, 0,  0, 20, 0, 0,    0, 20, 0, 0},
-
-        {0, 0, 0, 0,      0, 84 + 256, 0, 0,      1, 1, 10, 10,  3, 3, 10, 10},
-        {10, 10, 26 + 512, 10,  10, 286 + 512, 10, 10,  1, 1, 10, 10,  3, 3, 0, 0},
-        {0, 0, 20, 0,     0, 20, 0, 0,       0, 0, 0, 0,    20, 0, 0, 0},
-
-        {0, 0, 12 + 512, 10,  10, 94 + 512, 10, 10,  10, 10, 10, 10,  6, 0, 0, 0},
-        {0, 0, 0, 0,    0, 276 + 64, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0},
-        {0, 0, 0, 0,    0, 0, 0, 0,       0, 0, 0, 0,      0, 0, 0, 0},
-    };
-
-    Tilemap<PuzzleTile> *puzzleTilemap = new Tilemap<PuzzleTile>;
-    game->puzzleTilemap = puzzleTilemap;
-    puzzleTilemap->tilesVert = 9;
-    puzzleTilemap->tilesHorz = 16;
-    puzzleTilemap->tiles = new PuzzleTile[puzzleTilemap->tilesHorz * puzzleTilemap->tilesVert];
-
-    game->sources = new pair[3];
-    game->sources[0] = pair{2, 13};
-    game->sources[1] = pair{4, 0};
-    game->sources[2] = pair{4, 0};
-    game->sinks = new pair[3];
-    game->sinks[0] = pair{1, 15};
-    game->sinks[1] = pair{4, 7};
-    game->sinks[2] = pair{6, 12};
-    game->numSourceSinks = 3;
-
-    for (int i = 0; i < puzzleTilemap->tilesVert; i++) {
-        for (int j = 0; j < puzzleTilemap->tilesHorz; j++) {
-            // Build the tile from its code by explicitly calling its constructor
-            PuzzleTile *tile = puzzleTilemap->get(i, j);
-            tile->indices = pair{i,j};
-            tile->parseCode(puzzleTemplate[i][j]);
-        }
-    }
-
-    // TEMP: set highlighted tile
-    // NOTE: default "no tile selected" square is -1, -1
-    game->selection.hasSelection = false;
-}
-
-// Returns the minimum time between inputted dT and the time to one of the 4 walls of the object
-// we are testing for collision against. If return value < dT we collided with a the object.
-float testCollision(float dT, Entity *colliding, v2 testPosition, float testWidth, float testHeight) {
-    // TODO: clean up this code; make a generic edge checking function and check each edge w/ 4 function calls
-    // TODO: could instead return a "collision" struct with dT and other info (or NULL if no collision)
-    v2 velVector = colliding->speed * colliding->velocity.normalized();
-    // minkowski collision says we can add the radius of our colliding object to our object and then
-    // do raycasting
-    float lBound = testPosition.x - (testWidth + colliding->width) / 2.0;
-    float rBound = testPosition.x + (testWidth + colliding->width) / 2.0;
-    float tBound = testPosition.y - (testHeight + colliding->height) / 2.0;
-    float bBound = testPosition.y + (testHeight + colliding->height) / 2.0;
-    float minT = dT;
-    // left vert edge
-    if (velVector.x != 0) {
-        float x1T = (lBound - colliding->position.x) / velVector.x;
-        if (x1T > 0 && colliding->position.y + x1T * velVector.y >= tBound && colliding->position.y + x1T * velVector.y <= bBound) {
-            minT = x1T; 
-        }
-    }
-    // right vert edge
-    if (velVector.x != 0) {
-        float x2T = (rBound - colliding->position.x) / velVector.x;
-        if (x2T > 0 && colliding->position.y + x2T * velVector.y >= tBound && colliding->position.y + x2T * velVector.y <= bBound) {
-            minT = min(minT, x2T); 
-        }
-    }
-    // top horz edge
-    if (velVector.y != 0) {
-        float y1T = (tBound - colliding->position.y) / velVector.y;
-        if (y1T > 0 && colliding->position.x + y1T * velVector.x >= lBound && colliding->position.x + y1T * velVector.x <= rBound) {
-            minT = min(minT, y1T); 
-        }
-    }
-    // bottom horz edge
-    if (velVector.y != 0) {
-        float y2T = (bBound - colliding->position.y) / velVector.y;
-        if (y2T > 0 && colliding->position.x + y2T * velVector.x >= lBound && colliding->position.x + y2T * velVector.x <= rBound) {
-            minT = min(minT, y2T); 
-        }
-    }
-    return minT;
 
 }
-
-// debug function that makes a surface for a colored (AABBGGRR) rectangle
-SDL_Surface *DebugMakeRectSurface(int w, int h, int color) {
-    SDL_Surface *surface = SDL_CreateRGBSurface(0, w, h, 32,
-                                                 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
-    SDL_LockSurface(surface);
-    for (int i = 0; i < w * h; i++) {
-        *((int *)(surface->pixels) + i) = color;
-    }
-    SDL_UnlockSurface(surface);
-
-    return surface; 
-}
-
 
 void worldModeUpdate(GameState *game, Engine *engine) {
 
-        // update player position
-        // TODO: update by actual frametime not predicted frametime?
-        // TODO: improve collision detection
-        // strategy: check all 4 walls of all frames in min - max x/y of P0 -> P1 vector
-        // solve for time of collision for each wall
-        // takes smallest time (min w/ full move as well) and set position to be position 
-        // at that time (need epsilon?)
+    // update player position
+    // TODO: update by actual frametime not predicted frametime?
+    // TODO: improve collision detection
+    // strategy: check all 4 walls of all frames in min - max x/y of P0 -> P1 vector
+    // solve for time of collision for each wall
+    // takes smallest time (min w/ full move as well) and set position to be position 
+    // at that time (need epsilon?)
 
-        // Player -> tilemap collision
-        v2 newPlayerPos = game->player()->position + game->player()->speed * engine->frametimeTarget * game->player()->velocity.normalized();
-        // NOTE: adding player dimension only to maxes is (maybe) not strictly correct
+    // Player -> tilemap collision
+    v2 newPlayerPos = game->player()->position + game->player()->speed * engine->frametimeTarget * game->player()->velocity.normalized();
+    // NOTE: adding player dimension only to maxes is (maybe) not strictly correct
 
-        float vertExtrude = game->player()->height / 2.0;
-        float horzExtrude = game->player()->width / 2.0;
+    float vertExtrude = game->player()->height / 2.0;
+    float horzExtrude = game->player()->width / 2.0;
 
-        int minRow = (int)min(game->player()->position.y - vertExtrude, newPlayerPos.y - vertExtrude);
-        int maxRow = (int)max(game->player()->position.y + vertExtrude, newPlayerPos.y + vertExtrude);
-        int minCol = (int)min(game->player()->position.x - horzExtrude, newPlayerPos.x - horzExtrude);
-        int maxCol = (int)max(game->player()->position.x + horzExtrude, newPlayerPos.x + horzExtrude);
+    int minRow = (int)min(game->player()->position.y - vertExtrude, newPlayerPos.y - vertExtrude);
+    int maxRow = (int)max(game->player()->position.y + vertExtrude, newPlayerPos.y + vertExtrude);
+    int minCol = (int)min(game->player()->position.x - horzExtrude, newPlayerPos.x - horzExtrude);
+    int maxCol = (int)max(game->player()->position.x + horzExtrude, newPlayerPos.x + horzExtrude);
 
-        float minT = engine->frametimeTarget;
+    float minT = engine->frametimeTarget;
 
-        for (int i = minRow; i < maxRow + 1; i++) {
-            for (int j = minCol; j < maxCol + 1; j++) {
-                if (game->worldTilemap->get(i, j)->blocked) {
-                    float collisionT = testCollision(minT, game->player(), v2{(float)j + 0.5f, (float)i + 0.5f}, 1.0f, 1.0f);
-                    if (collisionT < minT) {
-                        // we collided so we set time to collision time
-                        minT = collisionT;
-                    }
+    for (int i = minRow; i < maxRow + 1; i++) {
+        for (int j = minCol; j < maxCol + 1; j++) {
+            if (game->worldTilemap->get(i, j)->blocked) {
+                float collisionT = testCollision(minT, game->player(), v2{j + 0.5f, i + 0.5f}, 1.0f, 1.0f);
+                if (collisionT < minT) {
+                    // we collided so we set time to collision time
+                    minT = collisionT;
                 }
-                // check if we hit a town (NOTE: technically this check should go after we determine final minT, but this should be equivalent
-                if ((game->worldTilemap->get(i, j))->town != NULL) {
-                    Town *town = game->worldTilemap->get(i, j)->town;
-                    float collisionT = testCollision(minT, game->player(), town->position, town->width, town->height);
-                    if (collisionT < minT && !hasOverlap(game->player()->position, game->player()->width, game->player()->height, town->position, town->width, town->height)) {
-                        game->mode = puzzleMode;
-                    }
-                }
+            }
+        }
+    }
 
+    // Player -> entity and entity->player collision
+    // brute force check for collision between player and all other entities
+    for (int i = 1; i < game->numEntities; i++) {
+        // TODO: not technically entirely correct
+        float playerEntityCollisionT = testCollision(minT, game->player(), game->entities[i]->position, game->entities[i]->width, game->entities[i]->height);
+        float entityPlayerCollisionT = testCollision(engine->frametimeTarget, game->entities[i], game->player()->position, game->player()->width, game->player()->height);
+        if (game->entities[i]->puzzleNumber > -1
+            && (playerEntityCollisionT < minT || entityPlayerCollisionT < engine->frametimeTarget)
+            && !hasOverlap(game->player()->position, game->player()->width, game->player()->height, game->entities[i]->position, game->entities[i]->width, game->entities[i]->height)) {
+                game->mode = puzzleMode;
+                game->currentPuzzle = game->entities[i]->puzzleNumber;
+        }
+        // move entity
+        game->entities[i]->position = game->entities[i]->position + game->entities[i]->speed * engine->frametimeTarget * game->entities[i]->velocity.normalized();
+    }
+
+    // move player
+    float eps = 0.0005;
+    game->player()->position = game->player()->position + game->player()->speed * (minT - eps) * game->player()->velocity.normalized();
+
+    // camera will follow player
+    game->worldCamera.position = game->player()->position - .5 * v2{game->worldCamera.width, game->worldCamera.height};
+
+    // set animations
+    if (!(leftPressed || upPressed || rightPressed || downPressed)) {
+        walking = false;
+        game->player()->velocity = v2{0,0};
+        game->player()->animator.stopAnimating();
+    } else {
+        walking = true;
+        game->player()->animator.isAnimating = true;
+
+        // left > right
+        if (leftPressed) {
+            game->player()->velocity.x = -1;
+            game->player()->animator.currentAnimation = LEFT;
+        } else {
+            if (rightPressed) {
+                game->player()->velocity.x = 1;
+                game->player()->animator.currentAnimation = RIGHT;
+            } else {
+                game->player()->velocity.x = 0;
             }
         }
 
-        // Player -> entity and entity->player collision
-        // brute force check for collision between player and all other entities
-        for (int i = 1; i < game->numEntities; i++) {
-            // TODO: not technically entirely correct
-            float playerEntityCollisionT = testCollision(minT, game->player(), game->entities[i]->position, game->entities[i]->width, game->entities[i]->height);
-            float entityPlayerCollisionT = testCollision(engine->frametimeTarget, game->entities[i], game->player()->position, game->player()->width, game->player()->height);
-            if ((playerEntityCollisionT < minT || entityPlayerCollisionT < engine->frametimeTarget) && !hasOverlap(game->player()->position, game->player()->width, game->player()->height, game->entities[i]->position, game->entities[i]->width, game->entities[i]->height)) {
-                    game->mode = puzzleMode;
+        // up > down
+        if (upPressed) {
+            game->player()->velocity.y = -1;
+            game->player()->animator.currentAnimation = UP;
+        } else {
+            if (downPressed) {
+                game->player()->velocity.y = 1;
+                game->player()->animator.currentAnimation = DOWN;
+            } else {
+                game->player()->velocity.y = 0;
             }
-            // move entity
-            game->entities[i]->position = game->entities[i]->position + game->entities[i]->speed * engine->frametimeTarget * game->entities[i]->velocity.normalized();
         }
-
-        // move player
-        float eps = 0.0005;
-        game->player()->position = game->player()->position + game->player()->speed * (minT - eps) * game->player()->velocity.normalized();
-
-        // camera will follow player
-        game->worldCamera.position = game->player()->position - .5 * v2{game->worldCamera.width, game->worldCamera.height};
+    }
 }
 
 void drawEntities(Engine *engine, Entity **entities, int numEntities) {
     Camera *camera = engine->activeCamera;
     // draw entities; write in decreasing order of index so that player is written last
     for (int i = numEntities-1; i >= 0; i--) {
+        // Draw to screen
         SDL_Rect destRect;
-        destRect.x = roundFloatToInt((entities[i]->position.x - camera->position.x - (entities[i]->width / 2.0)) * engine->unitWidth());
-        destRect.y = roundFloatToInt((entities[i]->position.y - camera->position.y - (entities[i]->height / 2.0)) * engine->unitHeight()); 
-        destRect.w = roundFloatToInt(entities[i]->width * engine->unitWidth());
-        destRect.h = roundFloatToInt(entities[i]->height * engine->unitHeight());
-        SDL_RenderCopy(engine->renderer, entities[i]->texture, NULL, &destRect);
+        Sprite *sprite = entities[i]->animator.currentSprite();
+        destRect.x = roundFloatToInt((entities[i]->position.x - camera->position.x - sprite->center.x) * engine->unitWidth());
+        destRect.y = roundFloatToInt((entities[i]->position.y - camera->position.y - sprite->center.y) * engine->unitHeight()); 
+        destRect.w = roundFloatToInt(sprite->width * engine->unitWidth());
+        destRect.h = roundFloatToInt(sprite->height * engine->unitHeight());
+        SDL_RenderCopy(engine->renderer, sprite->texture, NULL, &destRect);
     }
 }
 
@@ -652,42 +743,42 @@ bool canMoveTo(pair dest, pair source, Tilemap<PuzzleTile> *tilemap) {
     if (tile->existsLeft) {
         if (!tile->cappedLeft) {
             // tile openLeft
-            toRet = toRet && (dest.c - 1 > 0 && tilemap->get(dest.r, dest.c - 1)->existsRight);
+            toRet = toRet && (dest.c - 1 >= 0 && tilemap->get(dest.r, dest.c - 1)->existsRight);
         }
     } else {
         // neighbor openRight
-        toRet = toRet && !(dest.c - 1 > 0 && tilemap->get(dest.r, dest.c - 1)->openRight());
+        toRet = toRet && !(dest.c - 1 >= 0 && tilemap->get(dest.r, dest.c - 1)->openRight());
     }
 
     if (tile->existsUp) {
         if (!tile->cappedUp) {
-            toRet = toRet && (dest.c - 1 > 0 && tilemap->get(dest.r - 1, dest.c)->existsDown);
+            toRet = toRet && (dest.r - 1 >= 0 && tilemap->get(dest.r - 1, dest.c)->existsDown);
         }
     } else {
-        toRet = toRet && !(dest.c - 1 > 0 && tilemap->get(dest.r - 1, dest.c)->openDown());
+        toRet = toRet && !(dest.r - 1 >= 0 && tilemap->get(dest.r - 1, dest.c)->openDown());
     }
 
     if (tile->existsRight) {
         if (!tile->cappedRight) {
-            toRet = toRet && (dest.c - 1 > 0 && tilemap->get(dest.r, dest.c + 1)->existsLeft);
+            toRet = toRet && (dest.c + 1 >= 0 && tilemap->get(dest.r, dest.c + 1)->existsLeft);
         }
     } else {
-        toRet = toRet && !(dest.c - 1 > 0 && tilemap->get(dest.r, dest.c + 1)->openLeft());
+        toRet = toRet && !(dest.c + 1 >= 0 && tilemap->get(dest.r, dest.c + 1)->openLeft());
     }
 
     if (tile->existsDown) {
         if (!tile->cappedDown) {
-            toRet = toRet && (dest.c - 1 > 0 && tilemap->get(dest.r + 1, dest.c)->existsUp);
+            toRet = toRet && (dest.r + 1 > 0 && tilemap->get(dest.r + 1, dest.c)->existsUp);
         }
     } else {
-        toRet = toRet && !(dest.c - 1 > 0 && tilemap->get(dest.r + 1, dest.c)->openUp());
+        toRet = toRet && !(dest.r + 1 > 0 && tilemap->get(dest.r + 1, dest.c)->openUp());
     }
 
     return toRet;
 
 }
 
-bool hasSourceSinkPath(pair source, pair sink, Tilemap<PuzzleTile> *puzzlemap) {
+bool hasSourceSinkPath(Goal goal, Tilemap<PuzzleTile> *puzzlemap) {
 
     // row size for 2d indexing
     int rs = puzzlemap->tilesHorz;
@@ -695,14 +786,14 @@ bool hasSourceSinkPath(pair source, pair sink, Tilemap<PuzzleTile> *puzzlemap) {
     // use iterative DFS with a stack
     pair *stack = new pair[puzzlemap->tilesVert * puzzlemap->tilesHorz];
     // initialize stack
-    stack[0] = source;
+    stack[0] = goal.source;
     int currentIndex = 0;
 
     // use a 2d array of bools to avoid infinite DFS loop when graph has cycles
     bool *visited = new bool[puzzlemap->tilesVert * puzzlemap->tilesHorz];
     // zero out the array except for the source
     std::memset(visited, 0, puzzlemap->tilesVert * puzzlemap->tilesHorz);
-    visited[source.r * rs + source.c] = true;
+    visited[goal.source.r * rs + goal.source.c] = true;
 
     bool hitSink = false;
 
@@ -713,51 +804,51 @@ bool hasSourceSinkPath(pair source, pair sink, Tilemap<PuzzleTile> *puzzlemap) {
         currentTile = puzzlemap->get(currentPair.r, currentPair.c);
         currentIndex--;
         // left
-        if (currentTile->openLeft() && currentPair.c - 1 > 0 && !visited[currentPair.r * rs + currentPair.c - 1]) {
+        if (currentTile->openLeft() && currentPair.c - 1 >= 0 && !visited[currentPair.r * rs + currentPair.c - 1]) {
             PuzzleTile *nextTile = puzzlemap->get(currentPair.r, currentPair.c - 1);
             if (nextTile->isSpecial || nextTile->openRight()) {
                 visited[currentPair.r * rs + currentPair.c - 1] = true;
                 currentIndex++;
                 stack[currentIndex] = nextTile->indices;
-                hitSink = hitSink || sink == nextTile->indices;
+                hitSink = hitSink || goal.sink == nextTile->indices;
             }
             
         }
         // up
-        if (currentTile->openUp() && currentPair.r - 1 > 0 && !visited[(currentPair.r - 1) * rs + currentPair.c]) {
+        if (currentTile->openUp() && currentPair.r - 1 >= 0 && !visited[(currentPair.r - 1) * rs + currentPair.c]) {
             PuzzleTile *nextTile = puzzlemap->get(currentPair.r - 1, currentPair.c);
             if (nextTile->isSpecial || nextTile->openDown()) {
                 visited[(currentPair.r - 1) * rs + currentPair.c] = true;
                 currentIndex++;
                 stack[currentIndex] = nextTile->indices;
-                hitSink = hitSink || sink == nextTile->indices;
+                hitSink = hitSink || goal.sink == nextTile->indices;
             }
         }
         // right
-        if (currentTile->openRight() && currentPair.c + 1 > 0 && !visited[currentPair.r * rs + currentPair.c + 1]) {
+        if (currentTile->openRight() && currentPair.c + 1 >= 0 && !visited[currentPair.r * rs + currentPair.c + 1]) {
             PuzzleTile *nextTile = puzzlemap->get(currentPair.r, currentPair.c + 1);
             if (nextTile->isSpecial || nextTile->openLeft()) {
                 visited[currentPair.r * rs + currentPair.c + 1] = true;
                 currentIndex++;
                 stack[currentIndex] = nextTile->indices;
-                hitSink = hitSink || sink == nextTile->indices;
+                hitSink = hitSink || goal.sink == nextTile->indices;
             }
         }
         // down
-        if (currentTile->openDown() && currentPair.r + 1 > 0 && !visited[(currentPair.r + 1) * rs + currentPair.c]) {
+        if (currentTile->openDown() && currentPair.r + 1 >= 0 && !visited[(currentPair.r + 1) * rs + currentPair.c]) {
             PuzzleTile *nextTile = puzzlemap->get(currentPair.r + 1, currentPair.c);
             if (nextTile->isSpecial || nextTile->openUp()) {
                 visited[(currentPair.r + 1) * rs + currentPair.c] = true;
                 currentIndex++;
                 stack[currentIndex] = nextTile->indices;
-                hitSink = hitSink || sink == nextTile->indices;
+                hitSink = hitSink || goal.sink == nextTile->indices;
             }
         }
     }
 
     // cleanup
-    delete visited;
-    delete stack;
+    delete [] visited;
+    delete [] stack;
 
     return hitSink;
    
