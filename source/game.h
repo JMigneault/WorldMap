@@ -1,6 +1,6 @@
 #include "levels.h"
 #include "constants.h"
-#include "..\libraries\SDL2\include\SDL.h"
+#include "SDL.h"
 #include <math.h>
 #include <cstring>
 

@@ -1,11 +1,11 @@
 #include "game.h"
-#include "..\libraries\SDL2\include\SDL.h"
+#include "SDL_ttf.h"
 #include <stdio.h>
 #include <cstring>
 
 // TODO LIST OF TASKS TODO
 // TODO: - Finish granular level design (fill out small blocks) 
-// TODO: - Add progress text (0/4 puzzles completed - squares change color on puzzle completion)
+// TODO: - Add progress text (0/4 puzzles completed - squares change color on puzzle completion) [SDLTTF for font rendering]
 // TODO: - Fix player animation
 // TODO: - Clarify Puzzle goals, add pipe sprites, etc.
 // TODO END TASK LIST TODO
@@ -13,8 +13,6 @@
 // TODO: allow sources to have multiple sinks and detect (and disallow) the mixing of sources
 // TODO: allow sources to be special tiles
 // TODO: fix memory management!
-
-// TODO: towns sometimes do not appear!
 
 enum Direction {LEFT, UP, RIGHT, DOWN};
 
@@ -37,6 +35,21 @@ int main(int argc, char *argv[]) {
 
     initEngine(&engine);
     initGameState(&game, &engine);
+
+    // TEMP: font loading test
+    TTF_Init();
+    char *FONT_FP = ".\\assets\\FreeSans.ttf";
+    TTF_Font *font = TTF_OpenFont(FONT_FP, 36);
+    if (font == NULL) {
+        printf(SDL_GetError());
+    }
+    SDL_Color sentenceColor = {0, 0, 0};
+    SDL_Surface *sentenceSurface = TTF_RenderText_Solid(font, "Sample Text.", sentenceColor);
+    int sentenceHeight = sentenceSurface->h;
+    int sentenceWidth = sentenceSurface->w;
+    SDL_Texture *sentenceTexture = SDL_CreateTextureFromSurface(engine.renderer, sentenceSurface);
+    SDL_FreeSurface(sentenceSurface);
+
 
     while(true) {
         // main loop
@@ -172,6 +185,12 @@ int main(int argc, char *argv[]) {
                 }
                 
                 drawEntities(&engine, game.entities, game.numEntities);
+                SDL_Rect destRect;
+                destRect.x = 20;
+                destRect.y = 0;
+                destRect.w = sentenceWidth;
+                destRect.h = sentenceHeight;
+                SDL_RenderCopy(engine.renderer, sentenceTexture, NULL, &destRect);
                 break;
 
             case puzzleMode:
@@ -729,6 +748,19 @@ void drawEntities(Engine *engine, Entity **entities, int numEntities) {
         destRect.h = roundFloatToInt(sprite->height * engine->unitHeight());
         SDL_RenderCopy(engine->renderer, sprite->texture, NULL, &destRect);
     }
+}
+
+// TODO: decide interface for this
+void drawText(Engine *engine, TTF_Font *font, SDL_Color color, char **text, int x, int y) {
+    SDL_Surface *sentenceSurface = TTF_RenderText_Solid(font, text, color);
+    SDL_Rect destRect;
+    destRect.h = sentenceSurface->h;
+    destRect.w = sentenceSurface->w;
+    destRect.x = x;
+    destRect.y = y;
+    SDL_Texture *sentenceTexture = SDL_CreateTextureFromSurface(engine.renderer, sentenceSurface);
+    SDL_FreeSurface(sentenceSurface);
+    SDL_Free
 }
 
 // TODO: fix condition. Capped directions are optional and existence requirement should be bidirectional!
