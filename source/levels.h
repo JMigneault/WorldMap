@@ -1,3 +1,5 @@
+#include "SDL.h"
+
 // tilemap of the world
 const int WORLDWIDTH = 96;
 const int WORLDHEIGHT = 54;
@@ -158,3 +160,23 @@ const int puzzleFourSourceRows[puzzleFourNumGoals] = {0, 0, 0, 5, 5};
 const int puzzleFourSourceCols[puzzleFourNumGoals] = {1, 5, 5, 10, 11};
 const int puzzleFourSinkRows[puzzleFourNumGoals] = {3, 2, 2, 7, 8};
 const int puzzleFourSinkCols[puzzleFourNumGoals] = {3, 5, 11, 0, 0};
+
+// Text
+const char *fontPath = "assets\\FreeSans.ttf";
+const SDL_Color fontColor = SDL_Color{255, 255, 255};
+const int fontSize = 32;
+
+const int numWorldSentences = 1;
+const char *worldSentences[numWorldSentences] = {"Puzzles Solved 0/4"};
+const int worldSentencesX[numWorldSentences] = {10};
+const int worldSentencesY[numWorldSentences] = {0};
+const float worldSentencesScale[numWorldSentences] = {1};
+
+const char *puzzleUnsolvedText = "Puzzle Not Yet Solved";
+const int puzzleUnsolvedXStart = 10;
+const int puzzleUnsolvedYStart = 84;
+const int numPuzzleSentences = 3;
+const char *puzzleSentences[numPuzzleSentences - 1] = {"Exit [ESC]", "Switch tiles to connect the pipes!"};
+const int puzzleSentencesX[numPuzzleSentences - 1] = {10, 10};
+const int puzzleSentencesY[numPuzzleSentences - 1] = {0, 42};
+const float puzzleSentencesScale[numPuzzleSentences - 1] = {1, 1};

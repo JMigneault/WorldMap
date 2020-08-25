@@ -1,8 +1,8 @@
 #include "levels.h"
 #include "constants.h"
-#include "SDL.h"
 #include <math.h>
 #include <cstring>
+#include "SDL_ttf.h"
 
 // (Possible) TODO: replace common width/height format w/ a rect struct (containing width, height, v2 center)
 
@@ -261,10 +261,18 @@ struct Goal {
     pair sink;
 };
 
+struct Sentence {
+    SDL_Texture *texture;
+    SDL_Rect destRect;
+    float scale;
+};
+
 struct Puzzle {
     Tilemap<PuzzleTile> *tilemap;
     Goal *goals;
     int numGoals;
+    Sentence *sentence;
+    bool solved = false;
 };
 
 enum GameMode { worldMode, puzzleMode };
@@ -285,6 +293,7 @@ struct GameState {
     // TODO: encapsulate this?
     Puzzle *puzzles;
     int currentPuzzle;
+    int numPuzzlesSolved = 0;
     // TEMP:
     SDL_Texture *highlightTexture;
     TileSelection selection;
@@ -293,6 +302,14 @@ struct GameState {
     Entity *entities[1000]; // TODO: estimate max number of entities
     int numEntities;
     inline Player *player();
+
+    // text TODO
+    TTF_Font *font;
+    Sentence *puzzleSentences[1000];
+    int numPuzzleSentences;
+    Sentence *worldSentences[1000];
+    int numWorldSentences;
+
 };
 
 void initEngine(Engine *engine);
@@ -307,6 +324,8 @@ void initPuzzle(Puzzle *puzzle, const int puzzleTemplate[PUZZLEHEIGHT][PUZZLEWID
 void initAnimator(SDL_Renderer *renderer, Animator *animator, int numAnimations, const int *animationSizes, const char **bmps, int framesPerSprite, float pixelsPerUnit, const int *pixelCentersX, const int *pixelCentersY);
 SDL_Surface *DebugMakeRectSurface(int w, int h, int color);
 void DebugBuildTilemapTextures(Tilemap<PuzzleTile> *puzzleTilemap, Engine *engine);
+void renderSentences(Engine *engine, Sentence **sentences, int numSentences); 
+Sentence *buildSentence(Engine *engine, TTF_Font *font, SDL_Color color, const char *text, int x, int y, float scale);
 
 // NOTE: this provides an alias to reference player (entity 0)
 inline Player *GameState::player(void) {
@@ -384,8 +403,8 @@ inline float max(float x, float y) {
 inline bool pointInRect(v2 point, v2 pos, float width, float height) {
     return (point.x > pos.x - width/2
             && point.x < pos.x + width/2 
-            && point.y > pos.y - width/2 
-            && point.y < pos.y + width/2);
+            && point.y > pos.y - height/2 
+            && point.y < pos.y + height/2);
 }
 
 // misc operations
@@ -394,5 +413,11 @@ inline bool hasOverlap(v2 pos1, float width1, float height1, v2 pos2, float widt
             || pointInRect(pos1 + .5 * v2{width1, -height1}, pos2, width2, height2)
             || pointInRect(pos1 + .5 * v2{-width1, height1}, pos2, width2, height2)
             || pointInRect(pos1 + .5 * v2{-width1, -height1}, pos2, width2, height2)
+
+            || pointInRect(pos2 + .5 * v2{width2, height2}, pos1, width1, height1)
+            || pointInRect(pos2 + .5 * v2{width2, -height2}, pos1, width1, height1)
+            || pointInRect(pos2 + .5 * v2{-width2, height2}, pos1, width1, height1)
+            || pointInRect(pos2 + .5 * v2{-width2, -height2}, pos1, width1, height1)
+
     );
 }

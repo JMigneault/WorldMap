@@ -33,7 +33,7 @@ const float PUZZLECAMERAHEIGHT = 9.0;
 const int SCREENWIDTH = 1920;
 const int SCREENHEIGHT = 1080;
 
-const float ALLTOWNPOSX[] = {5.0, 90.0, 70.0, 2.5};
+const float ALLTOWNPOSX[] = {10.0, 90.0, 70.0, 2.5};
 const float ALLTOWNPOSY[] = {50.0, 40.0, 5.0, 22.5};
 
 // NOTE: filepaths cannot be longer than 100 chars

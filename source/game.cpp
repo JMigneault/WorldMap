@@ -1,5 +1,4 @@
 #include "game.h"
-#include "SDL_ttf.h"
 #include <stdio.h>
 #include <cstring>
 
@@ -13,6 +12,14 @@
 // TODO: allow sources to have multiple sinks and detect (and disallow) the mixing of sources
 // TODO: allow sources to be special tiles
 // TODO: fix memory management!
+
+// 8/23 TODO :
+// make player spawn in town center on leaving puzzle
+// adjust text + text colors
+// adjust world colors
+// add Congratualations text!
+// solve/investigate towns not appearing bug
+// fix player face bug
 
 enum Direction {LEFT, UP, RIGHT, DOWN};
 
@@ -35,21 +42,6 @@ int main(int argc, char *argv[]) {
 
     initEngine(&engine);
     initGameState(&game, &engine);
-
-    // TEMP: font loading test
-    TTF_Init();
-    char *FONT_FP = ".\\assets\\FreeSans.ttf";
-    TTF_Font *font = TTF_OpenFont(FONT_FP, 36);
-    if (font == NULL) {
-        printf(SDL_GetError());
-    }
-    SDL_Color sentenceColor = {0, 0, 0};
-    SDL_Surface *sentenceSurface = TTF_RenderText_Solid(font, "Sample Text.", sentenceColor);
-    int sentenceHeight = sentenceSurface->h;
-    int sentenceWidth = sentenceSurface->w;
-    SDL_Texture *sentenceTexture = SDL_CreateTextureFromSurface(engine.renderer, sentenceSurface);
-    SDL_FreeSurface(sentenceSurface);
-
 
     while(true) {
         // main loop
@@ -87,9 +79,10 @@ int main(int argc, char *argv[]) {
                                 downPressed = true;
                                 break;
                             // TEMP: Close puzzle window
-                            case SDLK_f:
+                            case SDLK_ESCAPE:
                                 game.mode = worldMode;
                                 break;
+/* DEBUG FUNCTIONALITY
                             // TEMP: check puzzle when p is pressed
                             case SDLK_p:
                                 checkPuzzle = true;
@@ -107,6 +100,7 @@ int main(int argc, char *argv[]) {
                             case SDLK_4:
                                 game.currentPuzzle = 3;
                                 break;
+*/
                        }
                        break;
  
@@ -131,7 +125,7 @@ int main(int argc, char *argv[]) {
                         switch(event.button.button) {
                             case SDL_BUTTON_LEFT:
                                 // select or switch tile
-                                if (game.mode == puzzleMode) {
+                                if (game.mode == puzzleMode && !game.puzzles[game.currentPuzzle].solved) {
                                     // todo
                                     // TODO (?): camera to world space function 
                                     int col = event.button.x / engine.unitWidth() - engine.activeCamera->position.x;
@@ -150,6 +144,7 @@ int main(int argc, char *argv[]) {
                                                 PuzzleTile temp = *tile;
                                                 game.puzzles[game.currentPuzzle].tilemap->set(row, col, game.puzzles[game.currentPuzzle].tilemap->get(game.selection.coords.r, game.selection.coords.c));
                                                 game.puzzles[game.currentPuzzle].tilemap->set(game.selection.coords.r, game.selection.coords.c, &temp);
+                                                checkPuzzle = true;
                                             }
                                         }
                                     }
@@ -185,12 +180,7 @@ int main(int argc, char *argv[]) {
                 }
                 
                 drawEntities(&engine, game.entities, game.numEntities);
-                SDL_Rect destRect;
-                destRect.x = 20;
-                destRect.y = 0;
-                destRect.w = sentenceWidth;
-                destRect.h = sentenceHeight;
-                SDL_RenderCopy(engine.renderer, sentenceTexture, NULL, &destRect);
+                renderSentences(&engine, game.worldSentences, game.numWorldSentences);
                 break;
 
             case puzzleMode:
@@ -198,7 +188,7 @@ int main(int argc, char *argv[]) {
                 game.puzzles[game.currentPuzzle].tilemap->renderTilemap(&engine);
 
                 // TEMP: highlight selected tile
-                if (game.selection.hasSelection) {
+                if (game.selection.hasSelection && !game.puzzles[game.currentPuzzle].solved) {
                     SDL_Rect destRect;
                     destRect.x = roundFloatToInt(((float)game.selection.coords.c - engine.activeCamera->position.x) * engine.unitWidth());
                     destRect.y = roundFloatToInt(((float)game.selection.coords.r - engine.activeCamera->position.y) * engine.unitHeight());
@@ -215,11 +205,32 @@ int main(int argc, char *argv[]) {
                     // TEMP: write to console
                     // TODO: gameplay consequences of solving puzzle
                     if (validSolution) {
+                        game.puzzles[game.currentPuzzle].solved = true;
+                        game.numPuzzlesSolved++;
+                        char worldStr[25];
+                        sprintf(worldStr, "Puzzles Solved %d/4", game.numPuzzlesSolved);
+                        game.worldSentences[0] = buildSentence(&engine, game.font, fontColor, worldStr, 10, 0, 1.0);
+                        SDL_Color finalColor = {255, 255, 255};
+                        game.puzzles[game.currentPuzzle].sentence = buildSentence(&engine, game.font, finalColor, "Puzzle Solved!", roundFloatToInt(engine.screenWidth / 2.0), roundFloatToInt(engine.screenHeight / 2.0), 7.0);
+                        SDL_Rect *destRect = &game.puzzles[game.currentPuzzle].sentence->destRect;
+                        float scale = game.puzzles[game.currentPuzzle].sentence->scale;
+                        destRect->x -= roundFloatToInt(destRect->w / 2.0 * scale);
+                        destRect->y -= roundFloatToInt(destRect->h / 2.0 * scale);
                         printf("Succesfully hit sink\n");
+                        if (game.numPuzzlesSolved == NUMPUZZLES) {
+                            game.numWorldSentences++;
+                            game.worldSentences[0]->scale *= 2.0;
+                            Sentence *sent = buildSentence(&engine, game.font, fontColor, "Congratulations!", roundFloatToInt(engine.screenWidth / 2.0), roundFloatToInt(engine.screenHeight / 2.0), 7.0);
+                            game.worldSentences[game.numWorldSentences-1] = sent;
+                            sent->destRect.x -= roundFloatToInt(sent->destRect.w / 2.0 * scale);
+                            sent->destRect.y -= roundFloatToInt(sent->destRect.h / 2.0 * scale);
+                        }
                     } else {
                         printf("Failed to hit sink\n");
                     }
                 }
+                game.puzzleSentences[0] = game.puzzles[game.currentPuzzle].sentence;
+                renderSentences(&engine, game.puzzleSentences, game.numPuzzleSentences);
                 break;
         }
 
@@ -347,7 +358,7 @@ void initGameState(GameState *game, Engine *engine) {
     SDL_FreeSurface(townSurface);
 
     // Create 4 towns
-    // TODO: first town has disappeared
+    // TODO: first town has disappeared (sometimes)
     for (int i = 0; i < 4; i++) {
         Town *town = new Town;
 
@@ -403,6 +414,32 @@ void initGameState(GameState *game, Engine *engine) {
     DebugBuildTilemapTextures(game->puzzles[1].tilemap, engine);
     DebugBuildTilemapTextures(game->puzzles[2].tilemap, engine);
     DebugBuildTilemapTextures(game->puzzles[3].tilemap, engine);
+
+    // build sentences
+    TTF_Init();
+
+    game->numWorldSentences = numWorldSentences;
+    game->numPuzzleSentences = numPuzzleSentences;
+
+    char fp[MAXFILEPATHLENGTH];
+    strcpy(fp, TLPATH);
+    strcat(fp, fontPath);
+ 
+    TTF_Font *font = TTF_OpenFont(fp, fontSize);
+    game->font = font;
+
+    for (int i = 0; i < numWorldSentences; i++) {
+        game->worldSentences[i] = buildSentence(engine, font, fontColor, worldSentences[i], worldSentencesX[i], worldSentencesY[i], worldSentencesScale[i]);
+    }
+
+    for (int i = 1; i < numPuzzleSentences; i++) {
+        game->puzzleSentences[i] = buildSentence(engine, font, fontColor, puzzleSentences[i - 1], puzzleSentencesX[i - 1], puzzleSentencesY[i - 1], puzzleSentencesScale[i - 1]);
+    }
+
+    for (int i = 0; i < NUMPUZZLES; i++) {
+        // TODO: fix constants
+        game->puzzles[i].sentence = buildSentence(engine, font, fontColor, puzzleUnsolvedText, puzzleUnsolvedXStart, puzzleUnsolvedYStart, 1.0);
+    }
 
     // TEMP: start game in world
     game->mode = worldMode;
@@ -641,6 +678,9 @@ void DebugBuildTilemapTextures(Tilemap<PuzzleTile> *puzzleTilemap, Engine *engin
 
 void worldModeUpdate(GameState *game, Engine *engine) {
 
+    int hasOver = hasOverlap(game->player()->position, game->player()->width, game->player()->height, game->entities[1]->position, game->entities[1]->width, game->entities[1]->height);
+    //printf("hasOverlap: %d\n", hasOver);
+
     // update player position
     // TODO: update by actual frametime not predicted frametime?
     // TODO: improve collision detection
@@ -750,17 +790,35 @@ void drawEntities(Engine *engine, Entity **entities, int numEntities) {
     }
 }
 
-// TODO: decide interface for this
-void drawText(Engine *engine, TTF_Font *font, SDL_Color color, char **text, int x, int y) {
+Sentence *buildSentence(Engine *engine, TTF_Font *font, SDL_Color color, const char *text, int x, int y, float scale) {
     SDL_Surface *sentenceSurface = TTF_RenderText_Solid(font, text, color);
+    SDL_Texture *sentenceTexture = SDL_CreateTextureFromSurface(engine->renderer, sentenceSurface);
+
     SDL_Rect destRect;
     destRect.h = sentenceSurface->h;
     destRect.w = sentenceSurface->w;
     destRect.x = x;
     destRect.y = y;
-    SDL_Texture *sentenceTexture = SDL_CreateTextureFromSurface(engine.renderer, sentenceSurface);
+    Sentence *sentence = new Sentence;
+    sentence->texture = sentenceTexture;
+    sentence->destRect = destRect;
+    sentence->scale = scale;
+
     SDL_FreeSurface(sentenceSurface);
-    SDL_Free
+
+    return sentence;
+}
+
+// TODO: decide interface for this
+void renderSentences(Engine *engine, Sentence **sentences, int numSentences) {
+
+    for (int i = 0; i < numSentences; i++) {
+        SDL_Rect scaledDestRect = sentences[i]->destRect;
+        scaledDestRect.w = roundFloatToInt(scaledDestRect.w * sentences[i]->scale);
+        scaledDestRect.h = roundFloatToInt(scaledDestRect.h * sentences[i]->scale);
+
+        SDL_RenderCopy(engine->renderer, sentences[i]->texture, NULL, &scaledDestRect);
+    }
 }
 
 // TODO: fix condition. Capped directions are optional and existence requirement should be bidirectional!
