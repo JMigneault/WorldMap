@@ -13,13 +13,7 @@
 // TODO: allow sources to be special tiles
 // TODO: fix memory management!
 
-// 8/23 TODO :
-// make player spawn in town center on leaving puzzle
-// adjust text + text colors
-// adjust world colors
 // add Congratualations text!
-// solve/investigate towns not appearing bug
-// fix player face bug
 
 enum Direction {LEFT, UP, RIGHT, DOWN};
 
@@ -382,6 +376,8 @@ void initGameState(GameState *game, Engine *engine) {
         town->height = TOWNHEIGHT;
         // TEMP:
         town->position = v2{ALLTOWNPOSX[i], ALLTOWNPOSY[i]};
+        town->speed = 0.0;
+        town->velocity = v2{0, 0};
         town->puzzleNumber = i;
         town->id = i + 1;
         game->entities[town->id] = town;

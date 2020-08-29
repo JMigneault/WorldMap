@@ -1,7 +1,7 @@
 
 // AABBGGRR: NOTE: alpha is "opaqueness" so must be set to 255 to see colors
-static const int dark = (0xFF << 24) | (0x00 << 16) | (0x11 << 8) | (0x30 << 0);
-static const int light = (0xFF << 24) | (0x00 << 16) | (0x30 << 8) | (0xC0 << 0);
+static const int dark = (0xFF << 24) | (0x7B << 16) | (0x98 << 8) | (0xDB << 0);
+static const int light = (0xFF << 24) | (0x8b << 16) | (0x8f << 8) | (0x99 << 0);
 static const int cutscene = (0xFF << 24) | (0xFF << 16) | (0xFF << 8) | (0xFF << 0);
 static const int out = (0xFF << 24) | (0x33 << 16) | (0x99 << 8) | (0x44 << 0);
 
